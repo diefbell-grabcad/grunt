@@ -1,6 +1,6 @@
 'use strict';
 
-var grunt = require('../../lib/grunt');
+var grunt = require('../../src/grunt');
 
 // Parse options printed by fixtures/Gruntfile-cli into an object.
 var optionValueRe = /###(.*?)###/;

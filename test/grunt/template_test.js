@@ -1,6 +1,6 @@
 'use strict';
 
-var grunt = require('../../lib/grunt');
+var grunt = require('../../src/grunt');
 
 exports.template = {
   'process': function(test) {

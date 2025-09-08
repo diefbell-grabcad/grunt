@@ -14,7 +14,7 @@
     "test-tap": "node bin/grunt test:tap",
     "build:cjs": "tsc -p tsconfig.cjs.json",
     "build:esm": "tsc -p tsconfig.esm.json",
-    "build": "npm build:cjs && npm build:esm"
+    "build": "npm run build:cjs && npm run build:esm"
   },
   "main": "./dist/cjs/index.js",
   "module": "./dist/esm/index.js",

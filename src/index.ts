@@ -1,0 +1,1 @@
+export { GruntConfig } from './config';
