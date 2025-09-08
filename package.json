@@ -1,7 +1,7 @@
 {
   "name": "grunt",
   "description": "The JavaScript Task Runner",
-  "version": "1.6.1",
+  "version": "2.0.0",
   "author": "Grunt Development Team (https://gruntjs.com/development-team)",
   "homepage": "https://gruntjs.com/",
   "repository": "https://github.com/gruntjs/grunt.git",
@@ -11,9 +11,21 @@
   },
   "scripts": {
     "test": "node bin/grunt test",
-    "test-tap": "node bin/grunt test:tap"
+    "test-tap": "node bin/grunt test:tap",
+    "build:cjs": "tsc -p tsconfig.cjs.json",
+    "build:esm": "tsc -p tsconfig.esm.json",
+    "build": "npm build:cjs && npm build:esm"
   },
-  "main": "lib/grunt",
+  "main": "./dist/cjs/index.js",
+  "module": "./dist/esm/index.js",
+  "types": "./dist/types/index.d.ts",
+  "exports": {
+    ".": {
+      "require": "./dist/cjs/index.js",
+      "import": "./dist/esm/index.js",
+      "types": "./types/index.d.ts"
+    }
+  },
   "bin": {
     "grunt": "bin/grunt"
   },
@@ -37,6 +49,7 @@
     "tool"
   ],
   "dependencies": {
+    "@types/node": "^16.18.126",
     "dateformat": "~4.6.2",
     "eventemitter2": "~0.4.13",
     "exit": "~0.1.2",
@@ -49,7 +62,8 @@
     "iconv-lite": "~0.6.3",
     "js-yaml": "~3.14.0",
     "minimatch": "~3.0.4",
-    "nopt": "^5.0.0"
+    "nopt": "^5.0.0",
+    "typescript": "^5.9.2"
   },
   "devDependencies": {
     "difflet": "~1.0.1",
