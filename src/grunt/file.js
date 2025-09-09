@@ -58,8 +58,6 @@ var processPatterns = function(patterns, fn) {
   return result;
 };
 
-// Match a filepath or filepaths against one or more wildcard patterns. Returns
-// all matching filepaths.
 file.match = function(options, patterns, filepaths) {
   if (grunt.util.kindOf(options) !== 'object') {
     filepaths = patterns;

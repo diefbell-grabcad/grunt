@@ -1,6 +1,6 @@
 'use strict';
 
-var grunt = require('../../lib/grunt');
+var grunt = require('../../src/grunt');
 
 var fs = require('fs');
 var path = require('path');

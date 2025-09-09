@@ -34,7 +34,7 @@ function gRequire(name) {
 
 var util = require('grunt-legacy-util');
 grunt.util = util;
-grunt.util.task = require('./util/task');
+grunt.util.task = require('./util/CommonTask');
 
 var Log = require('grunt-legacy-log').Log;
 var log = new Log({grunt: grunt});
