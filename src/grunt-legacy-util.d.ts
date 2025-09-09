@@ -92,7 +92,7 @@ declare module "grunt-legacy-util" {
 
 	// Internal libraries
 	export const namespace: any;
-	export const task: typeof import("./util/task");
+	export const task: typeof import("./util/CommonTask") | undefined;
 
 	// Idk what this is, but it's used in util/task.ts
 	export const _: any;
