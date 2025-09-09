@@ -92,8 +92,11 @@ declare module "grunt-legacy-util" {
 
 	// Internal libraries
 	export const namespace: any;
-	export const task: typeof import("./util/CommonTask") | undefined;
+	export const task: typeof import("../util/CommonTask") | undefined;
 
 	// Idk what this is, but it's used in util/task.ts
 	export const _: any;
+
+	// Idk why it's not just using `process.exit`
+	export const exit: typeof process.exit;
 }
