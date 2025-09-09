@@ -3,8 +3,11 @@ import * as fs from "fs";
 
 import * as minimatch from "minimatch";
 import * as glob from "glob";
+import * as iconv from "iconv-lite";
+import * as YAML from "js-yaml";
 import findup from "findup-sync";
 import util from "grunt-legacy-util";
+import { JsonObject } from "../@types/Json";
 
 /**
  * {@link http://gruntjs.com/api/grunt.file#grunt.file.defaultencoding}
@@ -74,6 +77,8 @@ interface IFileWriteStringOption extends IFileWriteOptions {
     | undefined;
 }
 
+type AnyFileWriteOption = IFileWriteBufferOption | IFileWriteStringOption;
+
 /**
  * {@link http://gruntjs.com/api/grunt.file}
  */
@@ -89,24 +94,45 @@ export interface FileModule {
 
   /**
    * Read and return a file's contents.
-   * Returns a string, unless options.encoding is null in which case it returns a Buffer.
+   * Returns a string, unless `options.encoding` is `null` in which case it returns the raw Buffer.
    */
   read(filepath: string): string;
-  read(filepath: string, options: IFileEncodedOption): Buffer;
+  read(filepath: string, options: IFileEncodedOption): string;
+  read(filepath: string, options: { encoding: null }): Buffer;
 
   /**
    * Read a file's contents, parsing the data as JSON and returning the result.
+   * Returns a string, unless `options.encoding` is `null` in which case it returns the raw Buffer.
    * @see FileModule.read for a list of supported options.
    */
-  readJSON(filepath: string): any;
-  readJSON(filepath: string, options: IFileEncodedOption): Buffer;
+  readJSON(filepath: string): JsonObject;
+  readJSON(filepath: string, options: IFileEncodedOption): JsonObject;
+  readJSON(filepath: string, options: { encoding: null }): Buffer;
 
   /**
    * Read a file's contents, parsing the data as YAML and returning the result.
+   * Returns a string, unless `options.encoding` is `null` in which case it returns the raw Buffer.
+   * Also accepts `yamlOptions` which are passed directly to js-yaml's `load` method.
    * @see FileModule.read for a list of supported options.
    */
-  readYAML(filepath: string): any;
-  readYAML(filepath: string, options: IFileEncodedOption): Buffer;
+  readYAML(filepath: string): JsonObject;
+  readYAML(
+    filepath: string,
+    options: null,
+    yamlOptions: { unsafeLoad: boolean }
+  ): JsonObject;
+  readYAML(filepath: string, options: IFileEncodedOption): JsonObject;
+  readYAML(
+    filepath: string,
+    options: IFileEncodedOption,
+    yamlOptions: { unsafeLoad: boolean }
+  ): JsonObject;
+  readYAML(filepath: string, options: { encoding: null }): Buffer;
+  readYAML(
+    filepath: string,
+    options: { encoding: null },
+    yamlOptions: { unsafeLoad: boolean }
+  ): Buffer;
 
   /**
    * Write the specified contents to a file, creating intermediate directories if necessary.
@@ -115,22 +141,20 @@ export interface FileModule {
    * @param contents If `contents` is a Buffer, encoding is ignored.
    * @param options If an encoding is not specified, default to grunt.file.defaultEncoding.
    */
-  write(filepath: string, contents: string, options?: IFileEncodedOption): void;
+  write(
+    filepath: string,
+    contents: string,
+    options?: IFileEncodedOption & { mode?: fs.Mode }
+  ): void;
   write(filepath: string, contents: Buffer): void;
 
   /**
    * Copy a source file to a destination path, creating intermediate directories if necessary.
    */
-  copy(srcpath: string, destpath: string): void;
   copy(
     srcpath: string,
     destpath: string,
-    options: IFileWriteStringOption
-  ): void;
-  copy(
-    srcpath: string,
-    destpath: string,
-    options: IFileWriteBufferOption
+    options?: IFileWriteBufferOption | IFileWriteStringOption
   ): void;
 
   /**
@@ -163,7 +187,8 @@ export interface FileModule {
       rootdir: string,
       subdir: string,
       filename: string
-    ) => void
+    ) => void,
+    subdir?: string
   ): void;
 
   /**
@@ -467,12 +492,15 @@ type ExpandOptions = glob.IOptions & {
 type FileMapping = {
   src: string[];
   dest: string;
-}
+};
 
 class GruntFile implements FileModule {
   public glob = glob;
   public minimatch = minimatch;
   public findup = findup;
+
+  public readonly defaultEncoding = "utf8";
+  public readonly preserveBOM = false;
 
   public setBase(...paths: string[]) {
     const dirpath = path.join(...paths);
@@ -601,16 +629,26 @@ class GruntFile implements FileModule {
     let patterns: string[];
 
     // If the first argument is an options object, separate it
-    if (typeof optionsOrPatterns === "object" && !Array.isArray(optionsOrPatterns)) {
+    if (
+      typeof optionsOrPatterns === "object" &&
+      !Array.isArray(optionsOrPatterns)
+    ) {
       options = optionsOrPatterns as ExpandOptions;
-      patterns = Array.isArray(patternsRest[0]) ? patternsRest[0] as string[] : (patternsRest as string[]);
+      patterns = Array.isArray(patternsRest[0])
+        ? (patternsRest[0] as string[])
+        : (patternsRest as string[]);
     } else {
-      patterns = [optionsOrPatterns as string, ...patternsRest.flat() as string[]];
+      patterns = [
+        optionsOrPatterns as string,
+        ...(patternsRest.flat() as string[]),
+      ];
     }
 
     if (patterns.length === 0) return [];
 
-    let matches = processPatterns(patterns, (pattern) => this.glob.sync(pattern, options));
+    let matches = processPatterns(patterns, (pattern) =>
+      this.glob.sync(pattern, options)
+    );
 
     // Apply filter if specified
     if (options.filter) {
@@ -634,7 +672,6 @@ class GruntFile implements FileModule {
     return matches;
   }
 
-
   /**
    * Returns an array of src-dest file mapping objects.
    * For each source file matched by a specified pattern, join that file path to the specified dest.
@@ -643,23 +680,24 @@ class GruntFile implements FileModule {
    * @see FileModule.expand method documentation for an explanation of how the patterns
    *      and options arguments may be specified.
    */
-  expandMapping(
+  public expandMapping(
     patterns: string[],
     destBase: string,
     opts: IExpandedFilesConfig
   ): IFileMap[] {
     const pathSeparatorRe = /[\/\\]/g;
 
-	// The "ext" option refers to either everything after the first dot (default)
-	// or everything after the last dot.
-	const extDotRe = {
-		first: /(\.[^\/]*)?$/,
-		last: /(\.[^\/\.]*)?$/,
-	} as const;
+    // The "ext" option refers to either everything after the first dot (default)
+    // or everything after the last dot.
+    const extDotRe = {
+      first: /(\.[^\/]*)?$/,
+      last: /(\.[^\/\.]*)?$/,
+    } as const;
 
     const options = {
       extDot: "first",
-      rename: (destBase: string, destPath: string) => path.join(destBase || "", destPath),
+      rename: (destBase: string, destPath: string) =>
+        path.join(destBase || "", destPath),
       ...opts,
     } as const;
 
@@ -697,6 +735,330 @@ class GruntFile implements FileModule {
     });
 
     return files;
+  }
+
+  /**
+   * Works like mkdir -p. Create a directory along with any intermediate directories.
+   * If mode isn't specified, it defaults to 0777 & (~process.umask()).
+   */
+  public mkdir(dirpath: string, mode?: string) {
+    if (grunt.option("no-write")) return;
+    try {
+      fs.mkdirSync(dirpath, { mode, recursive: true });
+    } catch (err) {
+      throw util.error(
+        'Unable to create directory "' +
+          dirpath +
+          '" (Error code: ' +
+          e.code +
+          ").",
+        e
+      );
+    }
+  }
+  /**
+   * Recurse into a directory, executing callback for each file.
+   *
+   * Callback args:
+   * abspath  - The full path to the current file,
+   *            which is nothing more than the rootdir + subdir + filename arguments, joined.
+   * rootdir  - The root director, as originally specified.
+   * subdir   - The current file's directory, relative to rootdir.
+   * filename - The filename of the current file, without any directory parts.
+   */
+  public recurse(
+    rootdir: string,
+    callback: (
+      abspath: string,
+      rootdir: string,
+      subdir: string,
+      filename: string
+    ) => void,
+    subdir: string = ""
+  ): void {
+    var abspath = subdir ? path.join(rootdir, subdir) : rootdir;
+    fs.readdirSync(abspath).forEach((filename) => {
+      var filepath = path.join(abspath, filename);
+      if (fs.statSync(filepath).isDirectory()) {
+        this.recurse(
+          rootdir,
+          callback,
+          unixifyPath(path.join(subdir || "", filename || ""))
+        );
+      } else {
+        callback(unixifyPath(filepath), rootdir, subdir, filename);
+      }
+    });
+  }
+
+  /**
+   * Read and return a file's contents.
+   * Returns a string, unless `options.encoding` is `null` in which case it returns the raw Buffer.
+   */
+  read(filepath: string): string;
+  read(filepath: string, opts: IFileEncodedOption): string;
+  read(filepath: string, opts: { encoding: null }): Buffer;
+  read(
+    filepath: string,
+    opts?: IFileEncodedOption | { encoding: null }
+  ): string | Buffer {
+    const options = opts ?? { encoding: this.defaultEncoding };
+
+    grunt.verbose.write("Reading " + filepath + "...");
+
+    try {
+      let contents: Buffer | string = fs.readFileSync(String(filepath));
+      // If encoding is not explicitly null, convert from encoded buffer to a
+      // string. If no encoding was specified, use the default.
+      if (options.encoding !== null) {
+        contents = iconv.decode(contents, options.encoding, {
+          stripBOM: !this.preserveBOM,
+        } as iconv.Options);
+      }
+      grunt.verbose.ok();
+      return contents;
+    } catch (e) {
+      grunt.verbose.error();
+      throw util.error(
+        'Unable to read "' +
+          filepath +
+          '" file (Error code: ' +
+          (e as NodeJS.ErrnoException).code +
+          ").",
+        e as Error
+      );
+    }
+  }
+
+  /**
+   * Read a file's contents, parsing the data as JSON and returning the result.
+   * Returns a string, unless `options.encoding` is `null` in which case it returns the raw Buffer.
+   * @see FileModule.read for a list of supported options.
+   */
+  readJSON(filepath: string): JsonObject;
+  readJSON(filepath: string, options: IFileEncodedOption): JsonObject;
+  readJSON(filepath: string, options: { encoding: null }): Buffer;
+  readJSON(
+    filepath: string,
+    options?: IFileEncodedOption | { encoding: null }
+  ): JsonObject | Buffer {
+    const src: string | Buffer = this.read(
+      filepath,
+      options as IFileEncodedOption
+    );
+    if (Buffer.isBuffer(src)) return src;
+
+    grunt.verbose.write("Parsing " + filepath + "...");
+    try {
+      const result = JSON.parse(src) as JsonObject;
+      grunt.verbose.ok();
+      return result;
+    } catch (e) {
+      grunt.verbose.error();
+      throw util.error(
+        'Unable to parse "' +
+          filepath +
+          '" file (' +
+          (e as Error).message +
+          ").",
+        e as Error
+      );
+    }
+  }
+
+  /**
+   * Read a file's contents, parsing the data as YAML and returning the result.
+   * Returns a string, unless `options.encoding` is `null` in which case it returns the raw Buffer.
+   * @see FileModule.read for a list of supported options.
+   */
+  readYAML(filepath: string): JsonObject;
+  readYAML(
+    filepath: string,
+    options: null,
+    yamlOptions: { unsafeLoad: boolean }
+  ): JsonObject;
+  readYAML(filepath: string, options: IFileEncodedOption): JsonObject;
+  readYAML(
+    filepath: string,
+    options: IFileEncodedOption,
+    yamlOptions: { unsafeLoad: boolean }
+  ): JsonObject;
+  readYAML(filepath: string, options: { encoding: null }): Buffer;
+  readYAML(
+    filepath: string,
+    options: { encoding: null },
+    yamlOptions: { unsafeLoad: boolean }
+  ): Buffer;
+  readYAML(
+    filepath: string,
+    options?: IFileEncodedOption | { encoding: null } | null,
+    yamlOptions?: { unsafeLoad: boolean }
+  ): JsonObject | Buffer {
+    const src = this.read(filepath, options as IFileEncodedOption);
+    if (Buffer.isBuffer(src)) return src;
+
+    var result;
+    grunt.verbose.write("Parsing " + filepath + "...");
+    try {
+      // use the recommended way of reading YAML files
+      // https://github.com/nodeca/js-yaml#safeload-string---options-
+      result = yamlOptions?.unsafeLoad ? YAML.load(src) : YAML.safeLoad(src);
+      grunt.verbose.ok();
+      return result;
+    } catch (e) {
+      grunt.verbose.error();
+      throw util.error(
+        'Unable to parse "' +
+          filepath +
+          '" file (' +
+          (e as Error).message +
+          ").",
+        e as Error
+      );
+    }
+  }
+
+  /**
+   * Write the specified contents to a file, creating intermediate directories if necessary.
+   * Strings will be encoded using the specified character encoding, Buffers will be written to disk as-specified.
+   *
+   * @param contents If `contents` is a Buffer, encoding is ignored.
+   * @param options If an encoding is not specified, default to grunt.file.defaultEncoding.
+   */
+  write(
+    filepath: string,
+    contents: string,
+    options?: IFileEncodedOption & { mode?: fs.Mode }
+  ): void;
+  write(filepath: string, contents: Buffer, option: { encoding: null }): void;
+  write(
+    filepath: string,
+    contents: Buffer | string,
+    opts?: IFileEncodedOption & { mode?: fs.Mode } & { encoding?: string | null }
+  ): void {
+    const options =
+      opts ??
+      ({
+        encoding: this.defaultEncoding,
+      } as IFileEncodedOption & { mode?: fs.Mode });
+
+    const nowrite = grunt.option("no-write");
+
+    grunt.verbose.write(
+      (nowrite ? "Not actually writing " : "Writing ") + filepath + "..."
+    );
+
+    // Create path, if necessary.
+    this.mkdir(path.dirname(filepath));
+    try {
+      // If contents is already a Buffer, don't try to encode it. If no encoding
+      // was specified, use the default.
+      if (!Buffer.isBuffer(contents)) {
+        contents = iconv.encode(contents, options.encoding);
+      }
+      // Actually write file.
+      if (!nowrite) {
+        fs.writeFileSync(
+          filepath,
+          contents,
+          "mode" in options ? { mode: options.mode } : {}
+        );
+      }
+      grunt.verbose.ok();
+    } catch (e) {
+      grunt.verbose.error();
+      throw util.error(
+        'Unable to write "' +
+          filepath +
+          '" file (Error code: ' +
+          (e as NodeJS.ErrnoException).code +
+          ").",
+        e as Error
+      );
+    }
+  }
+
+  /**
+   * Read a file, optionally processing its content, then write the output.
+   */
+  protected _copy(
+    srcpath: string,
+    destpath: string,
+    opts?: AnyFileWriteOption
+  ) {
+    const options = { ...(opts ?? {}) } as AnyFileWriteOption;
+
+	/**
+	 * Should we run the process hook?
+	 * 
+	 * If a process function was specified, and `noProcess` isn't true,
+	 * or doesn't match the srcpath, process the file's source
+	 */
+    const shouldProcess =
+		typeof options.process === "function" &&
+		options.noProcess !== true &&
+		!this.isMatch(options.noProcess, srcpath);
+
+    /**
+	 * If the file will be processed, use the encoding as-specified.
+	 * Otherwise, use an encoding of null to force the file to be read/written as a Buffer.
+	 */
+    const readWriteOptions = shouldProcess ? options : { encoding: null };
+
+    // Read file
+    let contents: string | Buffer = this.read(srcpath, readWriteOptions as IFileEncodedOption);
+
+    if (shouldProcess && options.process) {
+      grunt.verbose.write("Processing source...");
+      try {
+        contents = (options.process as any)(contents, srcpath, destpath) as string | boolean;
+        grunt.verbose.ok();
+      } catch (e) {
+        grunt.verbose.error();
+        throw util.error(`Error while processing "${srcpath}" file.`, e as Error);
+      }
+    }
+
+    // Abort if process returned false or destination is symlink
+    if (typeof contents === "boolean" && contents === false || this.isLink(destpath)) {
+      grunt.verbose.writeln(
+        "Write aborted. Either the process function returned false or the destination is a symlink"
+      );
+      return;
+    }
+
+    this.write(destpath, contents, readWriteOptions);
+  }
+
+  /**
+   * Read a file, optionally processing its content, then write the output.
+   * Or read a directory, recursively creating directories, reading files,
+   * processing content, writing output.
+   * Handles symlinks by coping them as files or directories.
+   */
+  copy(
+    srcpath: string,
+    destpath: string,
+    options?: IFileWriteBufferOption | IFileWriteStringOption
+  ): void {
+    if (this.isLink(srcpath)) {
+      this._copySymbolicLink(srcpath, destpath);
+    } else if (this.isDir(srcpath)) {
+      // Copy a directory, recursively.
+      // Explicitly create new dest directory.
+      this.mkdir(destpath);
+      // Iterate over all sub-files/dirs, recursing.
+      fs.readdirSync(srcpath).forEach((filepath) => {
+        this.copy(
+          path.join(srcpath, filepath),
+          path.join(destpath, filepath),
+          options
+        );
+      });
+    } else {
+      // Copy a single file.
+      this._copy(srcpath, destpath, options);
+    }
   }
 }
 
