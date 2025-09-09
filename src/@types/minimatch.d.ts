@@ -73,4 +73,21 @@ declare module "minimatch" {
          */
         flipNegate?: boolean | undefined;
     }
+    
+    /**
+     * Filter an array of file paths, returning only those that match a glob pattern.
+     *
+     * This is a convenience method provided by Grunt’s use of `minimatch`.
+     *
+     * @param list - An array of file paths to match against.
+     * @param pattern - The glob pattern to match each file path.
+     * @param options - Optional minimatch options (dot, nocase, etc.).
+     * @returns A new array containing only the file paths that match the pattern.
+     *
+     * @example
+     * const files = ["a.js", "b.ts", "c.js"];
+     * const jsFiles = minimatch.match(files, "*.js");
+     * // jsFiles => ["a.js", "c.js"]
+     */
+    function match(list: string[], pattern: string, options?: Minimatch.IOptions): string[];
 }

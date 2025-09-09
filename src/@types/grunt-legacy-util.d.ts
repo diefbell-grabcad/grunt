@@ -94,8 +94,25 @@ declare module "grunt-legacy-util" {
 	export const namespace: any;
 	export const task: typeof import("../util/CommonTask") | undefined;
 
-	// Idk what this is, but it's used in util/task.ts
-	export const _: any;
+	type NestedArray<T> = T | NestedArray<T>[];
+
+	// Basically Lodash
+	export const _: {
+		/**
+		 * Recursively flattens an array.
+		 */
+		flattenDeep<T>(array: NestedArray<T>): T[];
+
+		/**
+		 * Returns a new array with values from the first array that are not present in the other arrays.
+		 */
+		difference<T>(array: T[], ...values: T[][]): T[];
+
+		/**
+		 * Returns a new array of unique values, in order, from all given arrays.
+		 */
+		union<T>(...arrays: T[][]): T[];
+	};
 
 	// Idk why it's not just using `process.exit`
 	export const exit: typeof process.exit;
